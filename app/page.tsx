@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import CampfireCanvas from "./components/CampfireCanvas";
 import PostModal from "./components/PostModal";
 
@@ -9,15 +9,41 @@ export default function Home() {
   const [fuel, setFuel] = useState(0);
   const [level, setLevel] = useState(1);
   const [showModal, setShowModal] = useState(false);
+  const [musicOn, setMusicOn] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    // sessionStorage = タブごとに別ID（テスト用）。本番はlocalStorageに戻す
-    let id = sessionStorage.getItem("iv_session");
-    if (!id) { id = crypto.randomUUID(); sessionStorage.setItem("iv_session", id); }
+    let id = localStorage.getItem("iv_session");
+  if (!id) { id = crypto.randomUUID(); localStorage.setItem("iv_session", id); }
     setSessionId(id);
     setFuel(parseInt(localStorage.getItem("iv_fuel") || "0"));
     setLevel(parseInt(localStorage.getItem("iv_level") || "1"));
+
+    const audio = new Audio("/music/chill_bgm01.mp3");
+    audio.loop = true;
+    audio.volume = 0.4;
+    audioRef.current = audio;
+
+    return () => { audio.pause(); };
   }, []);
+
+  const startMusic = () => {
+    if (audioRef.current && !musicOn) {
+      audioRef.current.play().catch(() => {});
+      setMusicOn(true);
+    }
+  };
+
+  const toggleMusic = () => {
+    if (!audioRef.current) return;
+    if (musicOn) {
+      audioRef.current.pause();
+      setMusicOn(false);
+    } else {
+      audioRef.current.play().catch(() => {});
+      setMusicOn(true);
+    }
+  };
 
   const addFuel = () => {
     const next = fuel + 1;
@@ -53,6 +79,22 @@ export default function Home() {
         </div>
       </div>
 
+      {/* 音楽ボタン */}
+      <button
+        onClick={toggleMusic}
+        title={musicOn ? "音楽をオフ" : "音楽をオン"}
+        style={{
+          position: "absolute", top: 16, right: 16,
+          background: "rgba(0,0,0,0.5)", border: "1px solid #443300",
+          color: musicOn ? "#ffcc88" : "#665544",
+          fontFamily: "monospace", fontSize: "16px",
+          width: 36, height: 36, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        {musicOn ? "♪" : "♩"}
+      </button>
+
       {/* 火をくべるボタン */}
       {canStoke && (
         <button
@@ -71,7 +113,7 @@ export default function Home() {
 
       {/* つぶやくボタン */}
       <button
-        onClick={() => setShowModal(true)}
+        onClick={() => { startMusic(); setShowModal(true); }}
         style={{
           position: "absolute", bottom: 20, right: 20,
           background: "#553300", border: "2px solid #cc6600",
