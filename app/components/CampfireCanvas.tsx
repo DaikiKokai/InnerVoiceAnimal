@@ -411,7 +411,13 @@ export default function CampfireCanvas({ sessionId, campLevel, onFuelCollected }
       // 背景描画
       ctx.clearRect(0, 0, W, H);
       if (bgImageRef.current) {
-        ctx.drawImage(bgImageRef.current, 0, 0, W, H);
+        const img = bgImageRef.current;
+        const scale = Math.max(W / img.width, H / img.height);
+        const drawW = img.width * scale;
+        const drawH = img.height * scale;
+        const drawX = (W - drawW) / 2;
+        const drawY = (H - drawH) / 2;
+        ctx.drawImage(img, drawX, drawY, drawW, drawH);
       } else {
         drawBg(ctx, W, H);
       }
