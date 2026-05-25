@@ -27,6 +27,22 @@ interface Animal {
 
 interface BubbleRect { x: number; y: number; w: number; h: number }
 
+interface Spark {
+  x: number; y: number;
+  vx: number; vy: number;
+  life: number; maxLife: number;
+  size: number; colorIdx: number;
+}
+
+const SPARK_COLORS = ["#ff6600","#ff9900","#ffcc00","#ff4400","#ffee88","#ff7700"];
+
+interface WindStreak {
+  x: number; y: number;
+  speed: number; length: number;
+  opacity: number; maxOpacity: number;
+  delay: number;
+}
+
 interface Props {
   sessionId: string;
   campLevel: number;
@@ -43,6 +59,29 @@ const SPRITE_H: Record<AnimalType, number> = { cat: 13, rabbit: 15, bear: 15 };
 
 // ── 描画関数（Reactの外に定義） ──────────────────────────
 
+function drawFireGlow(ctx: CanvasRenderingContext2D, cx: number, cy: number, frame: number) {
+  const f1 = Math.sin(frame * 0.07) * 0.15;
+  const f2 = Math.sin(frame * 0.13 + 1.2) * 0.10;
+  const f3 = Math.sin(frame * 0.04 + 2.5) * 0.08;
+  const flicker = 0.65 + f1 + f2 + f3;
+
+  const r = 220 + flicker * 40;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+
+  const grad = ctx.createRadialGradient(cx, cy, 10, cx, cy, r);
+  grad.addColorStop(0,   `rgba(255,160, 40,${(flicker * 0.45).toFixed(2)})`);
+  grad.addColorStop(0.3, `rgba(255, 90, 15,${(flicker * 0.20).toFixed(2)})`);
+  grad.addColorStop(0.65,`rgba(180, 50,  5,${(flicker * 0.08).toFixed(2)})`);
+  grad.addColorStop(1,   "rgba(0,0,0,0)");
+
+  ctx.fillStyle = grad;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+  ctx.restore();
+}
+
 function drawBg(ctx: CanvasRenderingContext2D, w: number, h: number) {
   const g = ctx.createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, "#050510");
@@ -55,9 +94,26 @@ function drawBg(ctx: CanvasRenderingContext2D, w: number, h: number) {
 
 function drawStars(ctx: CanvasRenderingContext2D, stars: Star[], w: number, h: number, frame: number) {
   stars.forEach((s) => {
-    const a = 0.4 + 0.6 * Math.abs(Math.sin(s.phase + frame * 0.025));
-    ctx.fillStyle = `rgba(255,255,210,${a.toFixed(2)})`;
-    ctx.fillRect((s.x * w) | 0, (s.y * h) | 0, s.sz, s.sz);
+    const a = 0.3 + 0.7 * Math.abs(Math.sin(s.phase + frame * 0.025));
+    const sx = (s.x * w) | 0;
+    const sy = (s.y * h) | 0;
+    const sz = s.sz | 0;
+
+    ctx.save();
+    ctx.globalAlpha = a * 0.85;
+    ctx.fillStyle = "#ffffff";
+
+    // 中心ドット
+    ctx.fillRect(sx, sy, sz, sz);
+
+    // 明るい星だけ十字スパークル
+    if (s.sz > 2) {
+      const arm = Math.max(1, (sz * 1.5 * Math.abs(Math.sin(s.phase + frame * 0.04))) | 0);
+      ctx.globalAlpha = a * 0.5;
+      ctx.fillRect(sx - arm, sy + (sz >> 1), arm * 2 + sz, 1);
+      ctx.fillRect(sx + (sz >> 1), sy - arm, 1, arm * 2 + sz);
+    }
+    ctx.restore();
   });
 }
 
@@ -244,12 +300,23 @@ export default function CampfireCanvas({ sessionId, campLevel, onFuelCollected }
   const seenRef   = useRef<Set<string>>(new Set());
   const frameRef  = useRef(0);
   const bubbleRef = useRef<Map<string, BubbleRect>>(new Map());
+  const bgImageRef   = useRef<HTMLImageElement | null>(null);
+  const sparksRef    = useRef<Spark[]>([]);
+  const windRef      = useRef<WindStreak[]>([]);
+  const nextGustRef  = useRef<number>(3000);
+
+  // 背景画像を読み込む
+  useEffect(() => {
+    const img = new Image();
+    img.src = "/images/bg.png";
+    img.onload = () => { bgImageRef.current = img; };
+  }, []);
 
   // 星を初期化
   useEffect(() => {
-    starsRef.current = Array.from({ length: 90 }, () => ({
-      x: Math.random(), y: Math.random() * 0.65,
-      sz: Math.random() * 2 + 1,
+    starsRef.current = Array.from({ length: 40 }, () => ({
+      x: Math.random(), y: Math.random() * 0.30,
+      sz: Math.random() * 3 + 2,
       phase: Math.random() * Math.PI * 2,
     }));
   }, []);
@@ -343,10 +410,92 @@ export default function CampfireCanvas({ sessionId, campLevel, onFuelCollected }
 
       // 背景描画
       ctx.clearRect(0, 0, W, H);
-      drawBg(ctx, W, H);
+      if (bgImageRef.current) {
+        ctx.drawImage(bgImageRef.current, 0, 0, W, H);
+      } else {
+        drawBg(ctx, W, H);
+      }
+
+      // 星のキラキラアニメーション
       drawStars(ctx, starsRef.current, W, H, frame);
-      drawGround(ctx, W, H, gy);
-      drawFire(ctx, W / 2, gy, frame);
+
+      // 炎のグロー（明滅する環境光）
+      drawFireGlow(ctx, W / 2, H * 0.79, frame);
+
+      // 焚き火の火花パーティクル
+      const fireCx = W / 2;
+      const fireCy = H * 0.79; // 画像の炎の中心付近
+
+      // 火花を生成
+      const spawnCount = Math.random() < 0.7 ? Math.ceil(Math.random() * 3) : 0;
+      for (let i = 0; i < spawnCount; i++) {
+        if (sparksRef.current.length < 80) {
+          const maxLife = 35 + Math.random() * 45;
+          sparksRef.current.push({
+            x: fireCx + (Math.random() - 0.5) * 120,
+            y: fireCy + (Math.random() - 0.5) * 20,
+            vx: (Math.random() - 0.5) * 4.5,
+            vy: -(1.2 + Math.random() * 2.8),
+            life: maxLife, maxLife,
+            size: S,
+            colorIdx: Math.floor(Math.random() * SPARK_COLORS.length),
+          });
+        }
+      }
+
+      // 火花を更新・描画
+      sparksRef.current = sparksRef.current.filter((sp) => {
+        sp.x += sp.vx;
+        sp.y += sp.vy;
+        sp.vy *= 0.97;
+        sp.vx *= 0.98;
+        sp.life--;
+        if (sp.life <= 0) return false;
+        const alpha = sp.life / sp.maxLife;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = SPARK_COLORS[sp.colorIdx];
+        ctx.fillRect(sp.x | 0, sp.y | 0, sp.size, sp.size);
+        ctx.restore();
+        return true;
+      });
+
+      // 風アニメーション
+      if (ts > nextGustRef.current) {
+        const count = 12 + Math.floor(Math.random() * 16);
+        const baseY = H * (0.15 + Math.random() * 0.65);
+        const dir = Math.random() > 0.25 ? 1 : -1;
+        for (let i = 0; i < count; i++) {
+          const len = 40 + Math.random() * 90;
+          windRef.current.push({
+            x: dir > 0 ? -len - Math.random() * 150 : W + Math.random() * 150,
+            y: baseY + (Math.random() - 0.5) * 120,
+            speed: dir * (4 + Math.random() * 5),
+            length: len,
+            opacity: 0,
+            maxOpacity: 0.12 + Math.random() * 0.18,
+            delay: Math.random() * 40,
+          });
+        }
+        nextGustRef.current = ts + 6000 + Math.random() * 10000;
+      }
+
+      windRef.current = windRef.current.filter((w) => {
+        if (w.delay > 0) { w.delay--; return true; }
+        w.x += w.speed;
+        const progress = w.speed > 0
+          ? (w.x + w.length) / (W + w.length)
+          : 1 - w.x / (W + w.length);
+        w.opacity = w.maxOpacity * Math.sin(Math.max(0, Math.min(1, progress)) * Math.PI);
+        if (w.speed > 0 && w.x > W + 10) return false;
+        if (w.speed < 0 && w.x + w.length < -10) return false;
+        ctx.save();
+        ctx.globalAlpha = w.opacity;
+        ctx.fillStyle = "#c8dcff";
+        ctx.fillRect(w.speed > 0 ? w.x | 0 : (w.x - w.length) | 0, w.y | 0, w.length | 0, 1);
+        ctx.restore();
+        return true;
+      });
 
       // 動物を更新・描画
       const newBubbles = new Map<string, BubbleRect>();
